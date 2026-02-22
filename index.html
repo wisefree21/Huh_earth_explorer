@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>허병두 선생님과 함께하는 지구 탐험</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS (지도 라이브러리) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- 폰트: Noto Sans KR -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        #map { height: 100vh; width: 100vw; z-index: 0; }
+        #custom-map { height: 300px; width: 100%; z-index: 10; border-radius: 0.5rem; }
+        .modal-overlay { z-index: 50; }
+        .hud { z-index: 40; }
+        /* 플레이어가 지점을 찾을 때 마우스 커서를 십자 모양으로 변경 */
+        .guessing-cursor { cursor: crosshair !important; }
+        
+        /* 스크롤바 디자인 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+    </style>
+</head>
+<body class="bg-gray-100 overflow-hidden relative">
+
+    <!-- 메인 지도 영역 -->
+    <div id="map"></div>
+
+    <!-- 상단 HUD (현재 상태 표시) -->
+    <div id="hud-top" class="hud absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none hidden">
+        <div class="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl p-4 pointer-events-auto border-2 border-green-500">
+            <h2 id="hud-player" class="text-xl font-bold text-green-700 mb-1">1플레이어 차례</h2>
+            <p id="hud-round" class="text-sm text-gray-600">라운드: 1 / 3</p>
+        </div>
+        <div class="bg-green-600 shadow-xl rounded-xl p-4 pointer-events-auto text-center border-2 border-white transform hover:scale-105 transition-transform">
+            <p class="text-green-100 text-sm font-semibold mb-1">다음 지역을 지도에서 찾으세요!</p>
+            <h1 id="hud-target" class="text-3xl font-bold text-white tracking-tight">전라도</h1>
+        </div>
+        <div id="hud-scores" class="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl p-4 pointer-events-auto min-w-[150px]">
+            <h3 class="text-sm font-bold text-gray-800 border-b pb-2 mb-2">점수 현황</h3>
+            <ul id="score-list" class="space-y-1 text-sm font-medium text-gray-700">
+                <!-- 점수가 여기에 추가됩니다 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 모달: 시작 화면 -->
+    <div id="modal-start" class="modal-overlay absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity duration-300 overflow-y-auto py-8">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full text-center transform scale-100 transition-transform my-auto">
+            <div class="mb-4 text-green-600">
+                <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">허병두 선생님과 함께하는<br>지구 탐험</h1>
+            <p class="text-gray-500 mb-6">지명을 보고 지도 위에서 정확한 위치를 찾아보세요!</p>
+            
+            <div class="space-y-5 text-left">
+                <!-- 플레이어 설정 -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">플레이어 인원</label>
+                    <div class="flex space-x-2">
+                        <button class="player-btn flex-1 py-2 rounded-lg border-2 border-green-600 bg-green-600 text-white font-bold transition-colors" data-players="1">1인용</button>
+                        <button class="player-btn flex-1 py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors" data-players="2">2인용</button>
+                        <button class="player-btn flex-1 py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors" data-players="3">3인용</button>
+                    </div>
+                </div>
+
+                <!-- 랭킹 기록 옵션 -->
+                <div class="bg-green-50 p-4 rounded-xl border border-green-100">
+                    <label class="flex items-center space-x-2 cursor-pointer mb-2">
+                        <input type="checkbox" id="record-score-toggle" class="form-checkbox h-5 w-5 text-green-600 rounded cursor-pointer">
+                        <span class="text-sm font-bold text-green-800">오늘 명예의 전당에 점수 기록하기</span>
+                    </label>
+                    <div id="name-inputs-container" class="hidden space-y-2 mt-3">
+                        <!-- 자바스크립트에서 이름 입력칸 생성 -->
+                    </div>
+                </div>
+
+                <!-- 라운드 설정 -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">라운드 수</label>
+                    <div class="flex space-x-2">
+                        <button class="round-btn flex-1 py-2 rounded-lg border-2 border-green-600 bg-green-600 text-white font-bold transition-colors" data-rounds="3">3라운드</button>
+                        <button class="round-btn flex-1 py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors" data-rounds="5">5라운드</button>
+                        <button class="round-btn flex-1 py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors" data-rounds="10">10라운드</button>
+                    </div>
+                </div>
+
+                <!-- 난이도 설정 -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">난이도 선택</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button class="diff-btn py-2 rounded-lg border-2 border-green-600 bg-green-50 text-green-800 font-bold transition-colors" data-diff="beginner">초급 (도/국가)</button>
+                        <button class="diff-btn py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors" data-diff="intermediate">중급 (시/군/구)</button>
+                        <button class="diff-btn py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors" data-diff="advanced">고급 (읍/면/동)</button>
+                        <button class="diff-btn py-2 rounded-lg border-2 border-gray-300 text-gray-600 hover:border-green-400 font-bold transition-colors relative overflow-hidden" data-diff="expert">
+                            <span class="relative z-10">최고급 (역사/상세)</span>
+                            <div class="absolute inset-0 bg-red-100 opacity-0 hover:opacity-100 transition-opacity z-0"></div>
+                        </button>
+                    </div>
+                    <p id="diff-desc" class="text-xs text-gray-500 mt-2 text-center">오차 허용 범위가 넓습니다. 지역이나 국가 근처만 찍어도 높은 점수를 얻습니다.</p>
+                </div>
+                
+                <!-- 커스텀 모드 버튼 -->
+                <button id="btn-open-custom-modal" class="w-full py-2 mt-2 border-2 border-dashed border-gray-400 text-gray-600 font-bold rounded-lg hover:bg-gray-50 hover:border-gray-500 transition-colors">
+                    + 직접 장소 찍고 나만의 탐험 코스 만들기
+                </button>
+            </div>
+
+            <!-- 시작 버튼 -->
+            <button id="btn-start-game" class="mt-6 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1">탐험 시작하기</button>
+
+            <!-- 명예의 전당 (리더보드) -->
+            <div class="mt-8 bg-gray-50 rounded-xl p-4 border border-gray-200 text-left">
+                <h3 class="text-md font-bold text-gray-800 mb-3 flex items-center">
+                    <span class="text-yellow-500 mr-2">🏆</span> 오늘 달성한 최고 점수 (Top 3)
+                </h3>
+                <ul id="leaderboard-list" class="space-y-2 text-sm">
+                    <li class="text-gray-500 text-center py-2">순위 데이터를 불러오는 중입니다...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달: 나만의 탐험 코스 만들기 -->
+    <div id="modal-custom" class="modal-overlay absolute inset-0 bg-black/70 hidden flex items-center justify-center py-8 overflow-y-auto">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">나만의 탐험 코스 만들기</h2>
+                <button id="btn-close-custom" class="text-gray-500 hover:text-gray-800 p-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            
+            <p class="text-sm text-gray-600 mb-4">지도에서 원하는 위치를 클릭하고, 장소 이름을 입력하여 새로운 문제를 만들어 보세요.</p>
+            
+            <div class="flex flex-col md:flex-row gap-4 mb-4">
+                <div class="flex-1">
+                    <!-- 커스텀 지도 -->
+                    <div id="custom-map" class="border-2 border-gray-300"></div>
+                </div>
+                <div class="w-full md:w-64 flex flex-col">
+                    <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4 flex-1">
+                        <label class="block text-sm font-bold text-gray-700 mb-2">1. 지도에서 위치 클릭</label>
+                        <p id="custom-coord-text" class="text-xs text-gray-500 mb-4 bg-white p-2 border rounded">위치를 먼저 클릭하세요</p>
+                        
+                        <label class="block text-sm font-bold text-gray-700 mb-2">2. 장소 이름 입력</label>
+                        <input type="text" id="custom-location-name" placeholder="예: 우리 학교, 에펠탑" class="w-full p-2 border border-gray-300 rounded mb-4 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500">
+                        
+                        <button id="btn-add-custom-location" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed">문제 목록에 추가</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 만들어진 문제 목록 -->
+            <div class="bg-gray-50 rounded-xl p-4 border border-gray-200 mb-6">
+                <h3 class="text-sm font-bold text-gray-800 mb-2">만들어진 문제 목록 (<span id="custom-count">0</span>개)</h3>
+                <div class="max-h-32 overflow-y-auto">
+                    <ul id="custom-locations-list" class="space-y-2 text-sm">
+                        <li class="text-gray-500 text-center py-2 italic" id="custom-empty-msg">아직 추가된 문제가 없습니다.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <button id="btn-start-custom-game" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1">이 코스로 탐험 시작하기!</button>
+        </div>
+    </div>
+
+    <!-- 모달: 차례 알림 -->
+    <div id="modal-turn" class="modal-overlay absolute inset-0 bg-black/50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
+            <h2 id="turn-player-text" class="text-2xl font-bold text-green-600 mb-4">1플레이어 준비!</h2>
+            <p class="text-gray-600 mb-6">다음 지역을 찾을 준비가 되셨나요?</p>
+            <h3 id="turn-target-text" class="text-3xl font-black text-gray-800 mb-8 bg-gray-100 py-4 rounded-xl">전라도</h3>
+            <button id="btn-ready" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors">확인 (지도 보기)</button>
+        </div>
+    </div>
+
+    <!-- 모달: 결과 발표 -->
+    <div id="modal-result" class="modal-overlay absolute inset-0 bg-black/40 hidden flex items-center justify-end p-8 pb-12 flex-col pointer-events-none">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full text-center pointer-events-auto mb-4 border-t-8 border-green-500">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">탐색 결과</h2>
+            <div class="flex justify-between items-center bg-gray-50 p-4 rounded-xl mb-4">
+                <div class="text-left">
+                    <p class="text-sm text-gray-500">실제 위치와 떨어진 거리</p>
+                    <p id="result-distance" class="text-2xl font-black text-red-500">150 km</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">획득 점수</p>
+                    <p id="result-score" class="text-2xl font-black text-green-600">8,500 점</p>
+                </div>
+            </div>
+            <p id="result-msg" class="text-gray-600 font-medium mb-6">아주 훌륭합니다! 거의 정확하게 찾으셨네요.</p>
+            <button id="btn-next-turn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors">다음 차례로</button>
+        </div>
+    </div>
+
+    <!-- 모달: 최종 결과 -->
+    <div id="modal-final" class="modal-overlay absolute inset-0 bg-black/80 hidden flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div class="mb-4 text-yellow-400">
+                <svg class="w-20 h-20 mx-auto" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z" clip-rule="evenodd"></path></svg>
+            </div>
+            <h1 class="text-3xl font-black text-gray-800 mb-2">탐험 종료!</h1>
+            <h2 id="final-winner" class="text-xl font-bold text-green-600 mb-8">1플레이어가 우승했습니다!</h2>
+            
+            <div id="final-scores-list" class="space-y-3 mb-8 text-left">
+                <!-- 최종 점수 목록 -->
+            </div>
+
+            <button id="btn-restart" class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors">처음으로 돌아가기</button>
+        </div>
+    </div>
+
+    <!-- Firebase 및 메인 게임 로직 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase 설정 ---
+        let db, auth, user;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-geo-game';
+        let isFirebaseReady = false;
+
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                };
+
+                initAuth().then(() => {
+                    onAuthStateChanged(auth, (u) => {
+                        if (u) {
+                            user = u;
+                            isFirebaseReady = true;
+                            loadLeaderboard();
+                        }
+                    });
+                });
+            } else {
+                document.getElementById('leaderboard-list').innerHTML = '<li class="text-gray-500 text-center py-2">클라우드 저장소가 연결되지 않아 랭킹을 불러올 수 없습니다.</li>';
+            }
+        } catch (e) {
+            console.warn("Firebase 초기화 실패 (로컬 테스트 환경일 수 있습니다).", e);
+            document.getElementById('leaderboard-list').innerHTML = '<li class="text-gray-500 text-center py-2">랭킹 서버에 연결할 수 없습니다.</li>';
+        }
+
+        // --- 데이터 정의 (장소 목록) ---
+        const locationDB = {
+            beginner: [
+                { name: "전라도 (대한민국)", lat: 35.8, lng: 127.1 },
+                { name: "경상도 (대한민국)", lat: 36.0, lng: 128.8 },
+                { name: "충청도 (대한민국)", lat: 36.6, lng: 127.1 },
+                { name: "강원도 (대한민국)", lat: 37.8, lng: 128.2 },
+                { name: "경기도 (대한민국)", lat: 37.5, lng: 127.2 },
+                { name: "제주도 (대한민국)", lat: 33.4, lng: 126.5 },
+                { name: "프랑스", lat: 46.2276, lng: 2.2137 },
+                { name: "호주 (오스트레일리아)", lat: -25.2743, lng: 133.7751 },
+                { name: "이집트", lat: 26.8205, lng: 30.8024 },
+                { name: "브라질", lat: -14.2350, lng: -51.9252 },
+                { name: "일본", lat: 36.2048, lng: 138.2529 },
+                { name: "영국", lat: 55.3780, lng: -3.4359 },
+                { name: "미국", lat: 37.0902, lng: -95.7129 },
+                { name: "중국", lat: 35.8617, lng: 104.1954 },
+                { name: "이탈리아", lat: 41.8719, lng: 12.5674 }
+            ],
+            intermediate: [
+                { name: "부산광역시", lat: 35.1795, lng: 129.0756 },
+                { name: "서울특별시", lat: 37.5665, lng: 126.9780 },
+                { name: "대구광역시", lat: 35.8714, lng: 128.6014 },
+                { name: "뉴욕 (미국)", lat: 40.7127, lng: -74.0059 },
+                { name: "런던 (영국)", lat: 51.5073, lng: -0.1276 },
+                { name: "도쿄 (일본)", lat: 35.6761, lng: 139.6503 },
+                { name: "파리 (프랑스)", lat: 48.8566, lng: 2.3522 },
+                { name: "베이징 (중국)", lat: 39.9042, lng: 116.4073 },
+                { name: "시드니 (호주)", lat: -33.8688, lng: 151.2093 },
+                { name: "카이로 (이집트)", lat: 30.0444, lng: 31.2357 }
+            ],
+            advanced: [
+                { name: "강남구 (서울)", lat: 37.4979, lng: 127.0276 },
+                { name: "해운대구 (부산)", lat: 35.1631, lng: 129.1636 },
+                { name: "에펠탑 (프랑스 파리에 있는 탑)", lat: 48.8583, lng: 2.2944 },
+                { name: "자유의 여신상 (미국)", lat: 40.6892, lng: -74.0445 },
+                { name: "콜로세움 (이탈리아 로마)", lat: 41.8902, lng: 12.4922 },
+                { name: "만리장성 (중국)", lat: 40.4319, lng: 116.5703 },
+                { name: "타지마할 (인도)", lat: 27.1751, lng: 78.0421 },
+                { name: "마추픽추 (페루에 있는 잉카 유적)", lat: -13.1631, lng: -72.5449 },
+                { name: "부르즈 할리파 (두바이에 있는 세계 최고층 빌딩)", lat: 25.1971, lng: 55.2743 }
+            ],
+            expert: [
+                { name: "우금치 (동학농민운동이 일어난 격전지)", lat: 36.4353, lng: 127.1190 },
+                { name: "아비뇽 (아비뇽 유수가 일어난 곳)", lat: 43.9493, lng: 4.8055 },
+                { name: "팔로스 데 라 프론테라 (콜럼버스가 출항한 곳)", lat: 37.2285, lng: -6.8947 },
+                { name: "워털루 (나폴레옹이 크게 패배하여 싸움이 끝난 곳)", lat: 50.7135, lng: 4.3965 },
+                { name: "오마하 해변 (노르망디 상륙작전이 펼쳐진 곳)", lat: 49.3700, lng: -0.8800 },
+                { name: "보스턴 항구 (보스턴 차 사건이 일어난 곳)", lat: 42.3534, lng: -71.0507 },
+                { name: "폼페이 (화산 폭발로 묻혀버린 이탈리아 유적지)", lat: 40.7495, lng: 14.4868 },
+                { name: "체르노빌 원자력 발전소 (원자력 사고가 일어난 곳)", lat: 51.3891, lng: 30.0994 }
+            ]
+        };
+
+        const difficultyScale = {
+            beginner: 1500,
+            intermediate: 400,
+            advanced: 50,
+            expert: 10,
+            custom: 150 // 직접 만든 문제는 중급과 고급 사이 수준의 판정 허용
+        };
+
+        const difficultyDesc = {
+            beginner: "오차 허용 범위가 넓습니다. 지역이나 국가 근처만 찍어도 높은 점수를 얻습니다.",
+            intermediate: "오차 허용 범위가 보통입니다. 해당 도시나 지역 근방을 정확히 노려야 합니다.",
+            advanced: "오차 허용 범위가 좁습니다. 특정 랜드마크나 구/동 단위의 세밀한 위치를 찾아야 합니다.",
+            expert: "오차 허용 범위가 매우 엄격합니다. 역사적 장소의 정확한 좌표를 짚어내야 최고점을 받습니다.",
+            custom: "내가 직접 만든 코스입니다. 적당한 수준의 오차를 허용합니다."
+        };
+
+        // --- 게임 상태 변수 ---
+        let map;
+        let customMap;
+        let mapMarkers = [];
+        let mapPolyline = null;
+        let customTempMarker = null;
+        let baseLayer;
+        let labelLayer;
+
+        const gameState = {
+            numPlayers: 1,
+            difficulty: 'beginner',
+            currentRound: 1,
+            maxRounds: 3,
+            currentPlayer: 1,
+            scores: [],
+            playerNames: [],
+            currentTarget: null,
+            roundLocations: [],
+            customLocations: [], // 사용자가 만든 문제 목록
+            isGuessing: false,
+            recordScore: false
+        };
+
+        // --- 초기화 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            setupEventListeners();
+            generateNameInputs();
+        });
+
+        function initMap() {
+            map = L.map('map', { center: [30, 120], zoom: 3, zoomControl: false });
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                noWrap: true
+            }).addTo(map);
+
+            labelLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', { noWrap: true });
+            map.on('click', handleMapClick);
+
+            // 커스텀 생성용 지도 초기화
+            customMap = L.map('custom-map', { center: [36.5, 127.5], zoom: 2 });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap', noWrap: true
+            }).addTo(customMap);
+
+            customMap.on('click', (e) => {
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                
+                if (customTempMarker) {
+                    customMap.removeLayer(customTempMarker);
+                }
+                customTempMarker = L.marker([lat, lng]).addTo(customMap);
+                document.getElementById('custom-coord-text').innerHTML = `<span class="text-green-600 font-bold">선택 완료!</span> (위도: ${lat.toFixed(2)}, 경도: ${lng.toFixed(2)})`;
+                checkCustomAddReady();
+            });
+        }
+
+        // 플레이어 수에 맞게 이름 입력칸 생성
+        function generateNameInputs() {
+            const container = document.getElementById('name-inputs-container');
+            container.innerHTML = '';
+            for (let i = 1; i <= gameState.numPlayers; i++) {
+                container.innerHTML += `
+                    <input type="text" id="player-name-${i}" placeholder="${i}플레이어 이름 (입력 안하면 '익명'으로 저장)" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-green-500">
+                `;
+            }
+        }
+
+        function setupEventListeners() {
+            // 플레이어 수 선택
+            document.querySelectorAll('.player-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.player-btn').forEach(b => {
+                        b.classList.remove('bg-green-600', 'text-white', 'border-green-600');
+                        b.classList.add('bg-white', 'text-gray-600', 'border-gray-300');
+                    });
+                    e.target.classList.remove('bg-white', 'text-gray-600', 'border-gray-300');
+                    e.target.classList.add('bg-green-600', 'text-white', 'border-green-600');
+                    gameState.numPlayers = parseInt(e.target.dataset.players);
+                    generateNameInputs();
+                });
+            });
+
+            // 라운드 수 선택
+            document.querySelectorAll('.round-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.round-btn').forEach(b => {
+                        b.classList.remove('bg-green-600', 'text-white', 'border-green-600');
+                        b.classList.add('bg-white', 'text-gray-600', 'border-gray-300');
+                    });
+                    e.target.classList.remove('bg-white', 'text-gray-600', 'border-gray-300');
+                    e.target.classList.add('bg-green-600', 'text-white', 'border-green-600');
+                    gameState.maxRounds = parseInt(e.target.dataset.rounds);
+                });
+            });
+
+            // 난이도 선택
+            document.querySelectorAll('.diff-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const targetBtn = e.target.closest('.diff-btn');
+                    document.querySelectorAll('.diff-btn').forEach(b => {
+                        b.classList.remove('bg-green-50', 'text-green-800', 'border-green-600');
+                        b.classList.add('bg-white', 'text-gray-600', 'border-gray-300');
+                    });
+                    targetBtn.classList.remove('bg-white', 'text-gray-600', 'border-gray-300');
+                    targetBtn.classList.add('bg-green-50', 'text-green-800', 'border-green-600');
+                    gameState.difficulty = targetBtn.dataset.diff;
+                    document.getElementById('diff-desc').textContent = difficultyDesc[gameState.difficulty];
+                });
+            });
+
+            // 점수 기록 토글
+            document.getElementById('record-score-toggle').addEventListener('change', (e) => {
+                gameState.recordScore = e.target.checked;
+                const container = document.getElementById('name-inputs-container');
+                if (gameState.recordScore) {
+                    container.classList.remove('hidden');
+                } else {
+                    container.classList.add('hidden');
+                }
+            });
+
+            // 커스텀 문제 모달 제어
+            document.getElementById('btn-open-custom-modal').addEventListener('click', () => {
+                showModal('modal-custom');
+                // 지도가 모달 안에서 제대로 표시되도록 크기 재계산
+                setTimeout(() => { customMap.invalidateSize(); }, 200);
+            });
+            document.getElementById('btn-close-custom').addEventListener('click', () => {
+                hideModal('modal-custom');
+            });
+
+            // 커스텀 장소 이름 입력 감지
+            document.getElementById('custom-location-name').addEventListener('input', checkCustomAddReady);
+
+            // 커스텀 장소 추가 버튼
+            document.getElementById('btn-add-custom-location').addEventListener('click', () => {
+                if (!customTempMarker) return;
+                const nameInput = document.getElementById('custom-location-name');
+                const name = nameInput.value.trim();
+                if (!name) return;
+
+                const latlng = customTempMarker.getLatLng();
+                gameState.customLocations.push({
+                    name: name,
+                    lat: latlng.lat,
+                    lng: latlng.lng
+                });
+
+                // UI 업데이트
+                updateCustomListUI();
+                
+                // 초기화
+                nameInput.value = '';
+                customMap.removeLayer(customTempMarker);
+                customTempMarker = null;
+                document.getElementById('custom-coord-text').innerHTML = '위치를 먼저 클릭하세요';
+                checkCustomAddReady();
+            });
+
+            // 기본 시작 및 커스텀 시작 버튼
+            document.getElementById('btn-start-game').addEventListener('click', () => startGame(false));
+            document.getElementById('btn-start-custom-game').addEventListener('click', () => {
+                if (gameState.customLocations.length === 0) {
+                    alert('최소 1개 이상의 문제를 만들어야 합니다!');
+                    return;
+                }
+                hideModal('modal-custom');
+                startGame(true);
+            });
+
+            document.getElementById('btn-ready').addEventListener('click', () => {
+                hideModal('modal-turn');
+                gameState.isGuessing = true;
+                document.getElementById('map').classList.add('guessing-cursor');
+            });
+
+            document.getElementById('btn-next-turn').addEventListener('click', () => {
+                hideModal('modal-result');
+                clearMapMarkers();
+                nextTurn();
+            });
+
+            document.getElementById('btn-restart').addEventListener('click', () => {
+                hideModal('modal-final');
+                showModal('modal-start');
+            });
+        }
+
+        // --- 커스텀 코스 로직 ---
+        function checkCustomAddReady() {
+            const name = document.getElementById('custom-location-name').value.trim();
+            const btn = document.getElementById('btn-add-custom-location');
+            if (name && customTempMarker) {
+                btn.disabled = false;
+            } else {
+                btn.disabled = true;
+            }
+        }
+
+        function updateCustomListUI() {
+            const list = document.getElementById('custom-locations-list');
+            document.getElementById('custom-count').textContent = gameState.customLocations.length;
+            
+            if (gameState.customLocations.length === 0) {
+                list.innerHTML = '<li class="text-gray-500 text-center py-2 italic" id="custom-empty-msg">아직 추가된 문제가 없습니다.</li>';
+                return;
+            }
+            
+            list.innerHTML = '';
+            gameState.customLocations.forEach((loc, index) => {
+                const li = document.createElement('li');
+                li.className = 'bg-white p-2 border rounded flex justify-between items-center';
+                li.innerHTML = `
+                    <span class="font-bold text-gray-700">${index + 1}. ${loc.name}</span>
+                    <button class="text-red-500 hover:text-red-700 text-sm font-bold btn-del-custom" data-index="${index}">삭제</button>
+                `;
+                list.appendChild(li);
+            });
+
+            document.querySelectorAll('.btn-del-custom').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    gameState.customLocations.splice(idx, 1);
+                    updateCustomListUI();
+                });
+            });
+        }
+
+        // --- Firebase 리더보드 가져오기 ---
+        function loadLeaderboard() {
+            if (!user || !db) return;
+            const scoresRef = collection(db, 'artifacts', appId, 'public', 'data', 'geo_scores_daily');
+            
+            onSnapshot(scoresRef, (snapshot) => {
+                const today = new Date().toLocaleDateString();
+                let allScores = [];
+                
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.date === today) {
+                        allScores.push(data);
+                    }
+                });
+                
+                // 메모리에서 정렬 (높은 점수순)
+                allScores.sort((a, b) => b.score - a.score);
+                const top3 = allScores.slice(0, 3);
+                
+                const list = document.getElementById('leaderboard-list');
+                list.innerHTML = '';
+                
+                if (top3.length === 0) {
+                    list.innerHTML = '<li class="text-gray-500 text-center py-2">오늘 아직 기록을 남긴 탐험가가 없습니다. 첫 1위의 주인공이 되어보세요!</li>';
+                    return;
+                }
+                
+                const medals = ['🥇', '🥈', '🥉'];
+                top3.forEach((record, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex justify-between items-center bg-white p-2 rounded border border-gray-100 shadow-sm';
+                    li.innerHTML = `
+                        <div class="flex items-center">
+                            <span class="text-lg mr-2">${medals[index]}</span>
+                            <span class="font-bold text-gray-800">${record.name}</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="font-black text-green-600">${record.score.toLocaleString()} 점</span>
+                            <span class="text-xs text-gray-400 block">${record.info}</span>
+                        </div>
+                    `;
+                    list.appendChild(li);
+                });
+            }, (error) => {
+                console.error("Leaderboard fetch error:", error);
+            });
+        }
+
+        // --- Firebase 점수 저장 ---
+        async function saveScoreToFirebase(playerName, score, info) {
+            if (!user || !db || !gameState.recordScore) return;
+            
+            const finalName = playerName.trim() === '' ? '익명의 탐험가' : playerName;
+            const scoresRef = collection(db, 'artifacts', appId, 'public', 'data', 'geo_scores_daily');
+            const today = new Date().toLocaleDateString();
+            
+            try {
+                await addDoc(scoresRef, {
+                    name: finalName,
+                    score: score,
+                    info: info,
+                    date: today,
+                    timestamp: Date.now()
+                });
+            } catch (e) {
+                console.error("Error saving score", e);
+            }
+        }
+
+        // --- 게임 흐름 제어 ---
+        function startGame(isCustomMode) {
+            gameState.currentRound = 1;
+            gameState.currentPlayer = 1;
+            gameState.scores = Array(gameState.numPlayers).fill(0);
+            
+            // 이름 수집
+            gameState.playerNames = [];
+            for(let i=1; i<=gameState.numPlayers; i++) {
+                const nameInput = document.getElementById(`player-name-${i}`);
+                gameState.playerNames.push(nameInput ? nameInput.value : '');
+            }
+
+            let availableLocations = [];
+
+            if (isCustomMode) {
+                gameState.difficulty = 'custom';
+                // 커스텀 문제는 섞지 않고 순서대로 제공하거나, 문제가 적으면 반복
+                availableLocations = [...gameState.customLocations];
+            } else {
+                availableLocations = [...locationDB[gameState.difficulty]];
+                shuffleArray(availableLocations);
+            }
+            
+            const totalQuestions = gameState.numPlayers * gameState.maxRounds;
+            gameState.roundLocations = [];
+
+            // 문제 배열 채우기 (부족하면 반복해서라도 채움)
+            let qIndex = 0;
+            while(gameState.roundLocations.length < totalQuestions) {
+                gameState.roundLocations.push(availableLocations[qIndex % availableLocations.length]);
+                qIndex++;
+            }
+
+            hideModal('modal-start');
+            document.getElementById('hud-top').classList.remove('hidden');
+            updateHUDScore();
+            prepareTurn();
+        }
+
+        function prepareTurn() {
+            const questionIndex = ((gameState.currentRound - 1) * gameState.numPlayers) + (gameState.currentPlayer - 1);
+            gameState.currentTarget = gameState.roundLocations[questionIndex];
+
+            const pName = gameState.playerNames[gameState.currentPlayer - 1];
+            const displayName = pName ? pName : `${gameState.currentPlayer}플레이어`;
+
+            document.getElementById('turn-player-text').textContent = `${displayName}님 준비!`;
+            document.getElementById('turn-target-text').textContent = gameState.currentTarget.name;
+            
+            document.getElementById('hud-player').textContent = `${displayName} 차례`;
+            document.getElementById('hud-round').textContent = `라운드: ${gameState.currentRound} / ${gameState.maxRounds}`;
+            document.getElementById('hud-target').textContent = gameState.currentTarget.name;
+
+            map.setView([30, 0], 2, { animate: true, duration: 1 });
+            showModal('modal-turn');
+        }
+
+        function handleMapClick(e) {
+            if (!gameState.isGuessing) return;
+            
+            gameState.isGuessing = false;
+            document.getElementById('map').classList.remove('guessing-cursor');
+
+            const guessLatLng = e.latlng;
+            const actualLatLng = L.latLng(gameState.currentTarget.lat, gameState.currentTarget.lng);
+
+            const distanceMeters = map.distance(guessLatLng, actualLatLng);
+            const distanceKm = distanceMeters / 1000;
+
+            const scale = difficultyScale[gameState.difficulty];
+            let score = Math.round(10000 * Math.exp(-distanceKm / scale));
+            
+            if (score < 50) score = 0;
+
+            gameState.scores[gameState.currentPlayer - 1] += score;
+            updateHUDScore();
+
+            showResultOnMap(guessLatLng, actualLatLng, distanceKm, score);
+        }
+
+        function showResultOnMap(guessLatLng, actualLatLng, distanceKm, score) {
+            labelLayer.addTo(map);
+
+            const guessMarker = L.marker(guessLatLng).addTo(map)
+                .bindPopup('내가 선택한 위치').openPopup();
+            
+            const redIcon = new L.Icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            });
+            const targetMarker = L.marker(actualLatLng, {icon: redIcon}).addTo(map)
+                .bindPopup(`실제 위치: ${gameState.currentTarget.name}`);
+            
+            mapPolyline = L.polyline([guessLatLng, actualLatLng], {
+                color: '#22c55e', // Tailwind green-500
+                weight: 3,
+                dashArray: '5, 10'
+            }).addTo(map);
+
+            mapMarkers.push(guessMarker, targetMarker);
+
+            const bounds = L.latLngBounds([guessLatLng, actualLatLng]);
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
+
+            document.getElementById('result-distance').textContent = `${distanceKm.toLocaleString(undefined, {maximumFractionDigits: 1})} km`;
+            document.getElementById('result-score').textContent = `${score.toLocaleString()} 점`;
+            
+            let msg = "";
+            if (score >= 9500) msg = "완벽합니다! 소름 돋게 정확하네요!";
+            else if (score >= 7000) msg = "훌륭합니다! 꽤 정확한 위치를 알고 계시군요.";
+            else if (score >= 4000) msg = "아쉽네요. 방향은 얼추 비슷했습니다.";
+            else if (score > 0) msg = "많이 벗어났습니다. 다음에는 더 신중하게 탐험해 보세요.";
+            else msg = "완전히 다른 곳을 짚으셨습니다. 분발하세요!";
+            
+            document.getElementById('result-msg').textContent = msg;
+
+            setTimeout(() => { showModal('modal-result'); }, 1000);
+        }
+
+        function nextTurn() {
+            gameState.currentPlayer++;
+            if (gameState.currentPlayer > gameState.numPlayers) {
+                gameState.currentPlayer = 1;
+                gameState.currentRound++;
+            }
+
+            if (gameState.currentRound > gameState.maxRounds) {
+                endGame();
+            } else {
+                prepareTurn();
+            }
+        }
+
+        function endGame() {
+            document.getElementById('hud-top').classList.add('hidden');
+            
+            const finalScoresList = document.getElementById('final-scores-list');
+            finalScoresList.innerHTML = '';
+            
+            let highestScore = -1;
+            let winnerIndex = 0;
+
+            gameState.scores.forEach((score, index) => {
+                if (score > highestScore) {
+                    highestScore = score;
+                    winnerIndex = index;
+                }
+                
+                const pName = gameState.playerNames[index] || `${index + 1}플레이어`;
+                
+                const item = document.createElement('div');
+                item.className = 'flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-200';
+                item.innerHTML = `
+                    <span class="font-bold text-gray-700">${pName}</span>
+                    <span class="font-black text-green-600">${score.toLocaleString()} 점</span>
+                `;
+                finalScoresList.appendChild(item);
+
+                // DB에 기록 저장 (기록 토글을 켰을 때만)
+                if (gameState.recordScore) {
+                    let diffText = gameState.difficulty === 'custom' ? '나만의 코스' : document.querySelector(`[data-diff="${gameState.difficulty}"]`).textContent.split(' ')[0];
+                    let infoText = `${gameState.maxRounds}라운드 / ${diffText}`;
+                    saveScoreToFirebase(pName, score, infoText);
+                }
+            });
+
+            const winnerName = gameState.playerNames[winnerIndex] || `${winnerIndex + 1}플레이어`;
+            document.getElementById('final-winner').textContent = `${winnerName}님이 우승했습니다!`;
+            
+            showModal('modal-final');
+        }
+
+        // --- 유틸리티 함수 ---
+        function updateHUDScore() {
+            const list = document.getElementById('score-list');
+            list.innerHTML = '';
+            gameState.scores.forEach((score, index) => {
+                const li = document.createElement('li');
+                li.className = `flex justify-between ${index + 1 === gameState.currentPlayer ? 'text-green-700 font-extrabold' : ''}`;
+                li.innerHTML = `<span>${index + 1}P</span> <span>${score.toLocaleString()}</span>`;
+                list.appendChild(li);
+            });
+        }
+
+        function clearMapMarkers() {
+            if (map.hasLayer(labelLayer)) { map.removeLayer(labelLayer); }
+            mapMarkers.forEach(marker => map.removeLayer(marker));
+            mapMarkers = [];
+            if (mapPolyline) { map.removeLayer(mapPolyline); mapPolyline = null; }
+        }
+
+        function showModal(id) {
+            const modal = document.getElementById(id);
+            modal.classList.remove('hidden');
+            setTimeout(() => { modal.classList.remove('opacity-0'); }, 10);
+        }
+
+        function hideModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+    </script>
+</body>
+</html>
